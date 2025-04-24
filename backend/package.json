@@ -11,5 +11,11 @@
   "repository": {
     "type": "git",
     "url": "chatbot"
+  },
+  "keywords": [],
+  "dependencies": {
+    "aws-sdk": "^2.1692.0",
+    "axios": "^1.8.4",
+    "dotenv": "^16.5.0"
   }
 }
