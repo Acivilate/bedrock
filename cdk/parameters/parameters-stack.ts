@@ -9,7 +9,6 @@ export type ParameterStackOpts = {
 };
 
 export class ParameterStack extends cdk.Stack {
-  // Declare readonly fields for use in other stacks or stages
   readonly vpcIdName: string;
   readonly securityGroupIdName: string;
   readonly internetGatewayIdName: string;
@@ -40,7 +39,7 @@ export class ParameterStack extends cdk.Stack {
 
     const { tenantId, env } = opts; // Destructure env from opts
 
-    // **1. VPC Parameters**
+    // VPC
     this.vpcIdName = `/chatbot/vpc/${env}/vpcId`;
     const vpcIdName = new ssm.StringParameter(this, "VpcIdParam", {
       parameterName: this.vpcIdName,
@@ -104,7 +103,7 @@ export class ParameterStack extends cdk.Stack {
     });
     cdk.Tags.of(vpcPublicSubnetIdsName).add("env", opts.env);
 
-    // **2. Chatbot Backend Parameters**
+    // Chatbot Resources
     this.chatbotApiUrlName = `/chatbot/chatbot/${env}/apiUrl`;
     const chatbotApiUrlName = new ssm.StringParameter(this, "ChatbotApiUrlParam", {
       parameterName: this.chatbotApiUrlName,
@@ -123,7 +122,7 @@ export class ParameterStack extends cdk.Stack {
     });
     cdk.Tags.of(chatbotLambdaArnName).add("env", opts.env);
 
-    // **3. Cognito Parameters**
+    // Cognito
     this.userPoolIdName = `/chatbot/cognito/${env}/userPoolId`;
     const userPoolIdName = new ssm.StringParameter(this, "UserPoolIdParam", {
       parameterName: this.userPoolIdName,
@@ -169,7 +168,7 @@ export class ParameterStack extends cdk.Stack {
     });
     cdk.Tags.of(authRoleArnName).add("env", opts.env);
 
-    // **4. Data Storage Parameters**
+    // Data Storage (S3, Dynamdb, RDS?)
     this.chatS3BucketName = `/chatbot/chat/${env}/s3BucketName`;
     const chatS3BucketName = new ssm.StringParameter(this, "ChatS3BucketNameParam", {
       parameterName: this.chatS3BucketName,
@@ -188,7 +187,7 @@ export class ParameterStack extends cdk.Stack {
     });
     cdk.Tags.of(chatDynamoDbTableName).add("env", opts.env);
 
-    // **5. Shared Resources Parameters**
+    // Shared Resources (Roles and Policies?)
     this.lambdaExecutionRoleArnName = `/chatbot/shared/${env}/lambdaExecutionRoleArn`;
     const lambdaExecutionRoleArnName = new ssm.StringParameter(this, "LambdaExecutionRoleArnParam", {
       parameterName: this.lambdaExecutionRoleArnName,
