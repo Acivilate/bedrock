@@ -9,6 +9,7 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
+import { CONFIG } from './config';
 
 export class MultiTenantStack extends cdk.Stack {
     readonly vpc: Vpc;
@@ -18,14 +19,22 @@ export class MultiTenantStack extends cdk.Stack {
     readonly elasticIp: CfnEIP;
     readonly privateSubnetIds: string[];
     readonly publicSubnetIds: string[];
+    readonly userPool: cognito.UserPool;
+    readonly identityPool: cognito.CfnIdentityPool
+    readonly unauthRole: iam.Role;
+    readonly authRole: iam.Role;
+    readonly chatS3Bucket: s3.Bucket;
+    readonly chatDynamoDbTable: dynamodb.Table;
+    readonly chatbotLambda: lambda.Function;
+    readonly apiGatewayExecutionRole: iam.Role;
+    readonly logGroup: LogGroup;
 
-  constructor(scope: Construct, id: string, opts: { tenantId: string, env: string }, props?: cdk.StackProps) {
+  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    const { tenantId, env } = opts;
-
     // Create the VPC
-    const vpc = new Vpc(this, `${tenantId}-vpc-${env}`, {
+    const vpc = new Vpc(this, 'VPC', {
+      vpcName: `${CONFIG.tenantId}-vpc-${CONFIG.env}`,
       maxAzs: 2, // Max 2 Availability Zones for high availability
       natGateways: 1, // 1 NAT Gateway for private subnets to access the internet
       subnetConfiguration: [
@@ -42,30 +51,35 @@ export class MultiTenantStack extends cdk.Stack {
       ],
     });
 
-    // Internet Gateway (for public subnets to access the internet)
-    this.internetGateway = new cdk.aws_ec2.CfnInternetGateway(this, `${tenantId}-internet-gateway-${env}`, {
+    // // Internet Gateway (for public subnets to access the internet)
+    // this.internetGateway = new cdk.aws_ec2.CfnInternetGateway(this, 'Internet-Gateway', {
+    //   tags: [
+    //     { key: 'Name', value: `${CONFIG.tenantId}-internet-gateway-${CONFIG.env}` }
+    //   ],
+    // });
+
+    // new CfnVPCGatewayAttachment(this, 'VPCGatewayAttachment', {
+    //   vpcId: vpc.vpcId,
+    //   internetGatewayId: this.internetGateway.ref,
+    // });
+
+    // Create NAT Gateway (for private subnets to access the internet)
+    this.elasticIp = new CfnEIP(this, 'ElasticIp', {
+      domain: 'vpc',  // EIP for the NAT Gateway
       tags: [
-        { key: 'Name', value: `${tenantId}-internet-gateway-${env}` }
+        { key: 'Name', value: `${CONFIG.tenantId}-elasticIp-${CONFIG.env}` }
       ],
     });
-    new CfnVPCGatewayAttachment(this, `${tenantId}-vpc-gateway-attachment-${env}`, {
-      vpcId: vpc.vpcId,
-      internetGatewayId: this.internetGateway.ref,
-    });
-    // Create NAT Gateway (for private subnets to access the internet)
-    this.elasticIp = new CfnEIP(this, `${tenantId}-elastic-ip-${env}`, {
-      domain: 'vpc',  // EIP for the NAT Gateway
-    });
 
-    this.natGateway = new CfnNatGateway(this, `${tenantId}-nat-gateway-${env}`, {
+    this.natGateway = new CfnNatGateway(this, 'NatGateway', {
       allocationId: this.elasticIp.attrAllocationId,
       subnetId: vpc.publicSubnets[0].subnetId,
       tags: [
-        { key: 'Name', value: `${tenantId}-nat-gateway-${env}` }
+        { key: 'Name', value: `${CONFIG.tenantId}-nat-gateway-${CONFIG.env}` }
       ],
     });
     // Security Group (Lambda functions, API Gateway, etc)
-    this.securityGroup = new SecurityGroup(this, `${tenantId}-security-group-${env}`, {
+    this.securityGroup = new SecurityGroup(this, 'VPCSecurityGroup', {
       vpc: vpc,
       description: 'Security group for Lambda functions or API Gateway',
     });
@@ -79,7 +93,7 @@ export class MultiTenantStack extends cdk.Stack {
 
     // Create Cognito User Pool
     const userPool = new cognito.UserPool(this, 'UserPool', {
-      userPoolName: `${tenantId}-user-pool-${env}`,
+      userPoolName: `${CONFIG.tenantId}-user-pool-${CONFIG.env}`,
       signInAliases: { email: true },
       autoVerify: { email: true },
       mfa: cognito.Mfa.OPTIONAL,
@@ -100,7 +114,7 @@ export class MultiTenantStack extends cdk.Stack {
 
     // Create Cognito Identity Pool (for federated identities)
     const identityPool = new cognito.CfnIdentityPool(this, 'IdentityPool', {
-      identityPoolName: `${tenantId}-identity-pool-${env}`,
+      identityPoolName: `${CONFIG.tenantId}-identity-pool-${CONFIG.env}`,
       allowUnauthenticatedIdentities: false,  
       cognitoIdentityProviders: [
         {
@@ -112,6 +126,7 @@ export class MultiTenantStack extends cdk.Stack {
 
     // IAM Role for unauthenticated users
     const unauthRole = new iam.Role(this, 'UnauthenticatedRole', {
+      roleName: `${CONFIG.tenantId}-unauthRole-${CONFIG.env}`,
       assumedBy: new iam.FederatedPrincipal('cognito-identity.amazonaws.com', {
         'StringEquals': {
           'cognito-identity.amazonaws.com:aud': identityPool.ref,
@@ -130,6 +145,7 @@ export class MultiTenantStack extends cdk.Stack {
 
     // IAM Role for authenticated users
     const authRole = new iam.Role(this, 'AuthenticatedRole', {
+      roleName: `${CONFIG.tenantId}-authRole-${CONFIG.env}`,
       assumedBy: new iam.FederatedPrincipal('cognito-identity.amazonaws.com', {
         'StringEquals': {
           'cognito-identity.amazonaws.com:aud': identityPool.ref,
@@ -156,30 +172,45 @@ export class MultiTenantStack extends cdk.Stack {
     });
 
     // Create S3 Bucket
-    const chatS3Bucket = new s3.Bucket(this, `${tenantId}-ChatBucket-${env}`, {
+    const chatS3Bucket = new s3.Bucket(this, 'ChatS3Bucket', {
+      bucketName: `${CONFIG.tenantId}-chat-bucket-${CONFIG.env}`,
       versioned: true,
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
     // Create DynamoDB Table
-    const chatDynamoDbTable = new dynamodb.Table(this, `${tenantId}-ChatDynamoDb-${env}`, {
+    const chatDynamoDbTable = new dynamodb.Table(this, `${CONFIG.tenantId}-ChatDynamoDb-${CONFIG.env}`, {
       partitionKey: { name: 'customerId', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'documentId', type: dynamodb.AttributeType.STRING },
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
     // Create Lambda Execution Role
-    const lambdaExecutionRole = new iam.Role(this, `${tenantId}-LambdaExecutionRole-${env}`, {
+    const lambdaExecutionRole = new iam.Role(this, `${CONFIG.tenantId}-LambdaExecutionRole-${CONFIG.env}`, {
       assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
       managedPolicies: [
         iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
         iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonS3FullAccess'),
         iam.ManagedPolicy.fromAwsManagedPolicyName('AmazonDynamoDBFullAccess'),
       ],
+      inlinePolicies: {
+        NetworkInterfacePolicy: new iam.PolicyDocument({
+          statements: [
+            new iam.PolicyStatement({
+              actions: [
+                'ec2:CreateNetworkInterface',
+                'ec2:DescribeNetworkInterfaces',
+                'ec2:DeleteNetworkInterface',
+              ],
+              resources: ['*'], // You can limit the resources if needed
+            }),
+          ],
+        }),
+      },
     });
 
     // Create Lambda function
-    const chatbotLambda = new lambda.Function(this, `${tenantId}-ChatbotLambda-${env}`, {
+    const chatbotLambda = new lambda.Function(this, `${CONFIG.tenantId}-ChatbotLambda-${CONFIG.env}`, {
       runtime: lambda.Runtime.NODEJS_18_X,
       handler: 'index.handler',
       code: lambda.Code.fromAsset('./lambdas'),
@@ -205,21 +236,37 @@ export class MultiTenantStack extends cdk.Stack {
     chatS3Bucket.grantRead(chatbotLambda);
 
     // IAM Role for API Gateway access** (API Gateway interacting with Lambda)
-    const apiGatewayExecutionRole = new iam.Role(this, `${tenantId}-ApiGatewayExecutionRole-${env}`, {
+    const apiGatewayExecutionRole = new iam.Role(this, `${CONFIG.tenantId}-ApiGatewayExecutionRole-${CONFIG.env}`, {
       assumedBy: new iam.ServicePrincipal('apigateway.amazonaws.com'),
-      managedPolicies: [
-        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AmazonAPIGatewayInvokeFullAccess'),
-      ],
+      inlinePolicies: {
+        ApiGatewayInvokePolicy: new iam.PolicyDocument({
+          statements: [
+            new iam.PolicyStatement({
+              actions: [
+                'execute-api:Invoke',
+              ],
+              resources: ['*'], // You can restrict the resource ARN if needed
+            }),
+          ],
+        }),
+      },
     });
+    
+    // const apiGatewayExecutionRole = new iam.Role(this, `${CONFIG.tenantId}-ApiGatewayExecutionRole-${CONFIG.env}`, {
+    //   assumedBy: new iam.ServicePrincipal('apigateway.amazonaws.com'),
+    //   managedPolicies: [
+    //     iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AmazonAPIGatewayInvokeFullAccess'),
+    //   ],
+    // });
     // CloudWatch Log Group** (For logging Lambda function executions)
-    const logGroup = new LogGroup(this, `${tenantId}-SharedLogGroup-${env}`, {
-      logGroupName: `/aws/lambda/${tenantId}-shared-log-group-${env}`,
+    const logGroup = new LogGroup(this, 'LambdaLogGroup', {
+      logGroupName: `/aws/lambda/${CONFIG.tenantId}-shared-log-group-${CONFIG.env}`,
       removalPolicy: cdk.RemovalPolicy.DESTROY, // Delete when the stack is deleted
     });
 
     // Create API Gateway
-    const api = new apigateway.RestApi(this, `${tenantId}-ChatbotApi-${env}`, {
-      restApiName: 'Chatbot API',
+    const api = new apigateway.RestApi(this, 'API-Gateway', {
+      restApiName: `${CONFIG.tenantId}-ChatbotApi-${CONFIG.env}`,
       description: 'API for interacting with the chatbot',
     });
 
@@ -228,33 +275,34 @@ export class MultiTenantStack extends cdk.Stack {
     chatbotResource.addMethod('POST', new apigateway.LambdaIntegration(chatbotLambda));
 
     //  Outputs for use in other stacks
-    new cdk.CfnOutput(this, `${tenantId}-VpcId-${env}`, {
+    new cdk.CfnOutput(this, 'VpcIdOutput', {
       value: vpc.vpcId,
       description: 'The ID of the VPC',
-      exportName: `${tenantId}-VpcId-${env}`,
+      exportName: 'VpcIdOutput',
     });
-    new cdk.CfnOutput(this, `${tenantId}-SecurityGroupId-${env}`, {
+
+    new cdk.CfnOutput(this, 'SecurityGroupIdOutput', {
       value: this.securityGroup.securityGroupId,
       description: 'The ID of the Security Group',
-      exportName: `${tenantId}-SecurityGroupId-${env}`,
+      exportName: 'SecurityGroupIdOutput',
     });
 
-    new cdk.CfnOutput(this, `${tenantId}-InternetGatewayId-${env}`, {
-      value: this.internetGateway.ref,
-      description: 'The ID of the Internet Gateway',
-      exportName: `${tenantId}-InternetGatewayId-${env}`,
-    });
+    // new cdk.CfnOutput(this, 'InternetGatewayIdOutput', {
+    //   value: this.internetGateway.ref,
+    //   description: 'The ID of the Internet Gateway',
+    //   exportName: 'InternetGatewayIdOutput',
+    // });
 
-    new cdk.CfnOutput(this, `${tenantId}-NatGatewayId-${env}`, {
+    new cdk.CfnOutput(this, 'NatGatewayIdOutput', {
       value: this.natGateway.ref,
       description: 'The ID of the NAT Gateway',
-      exportName: `${tenantId}-NatGatewayId-${env}`,
+      exportName: 'NatGatewayIdOutput',
     });
 
-    new cdk.CfnOutput(this, `${tenantId}-ElasticIp-${env}`, {
+    new cdk.CfnOutput(this, 'ElasticIpOutput', {
       value: this.elasticIp.ref,
       description: 'The Elastic IP for the NAT Gateway',
-      exportName: `${tenantId}-ElasticIp-${env}`,  
+      exportName: 'ElasticIpOutput',  
     });
 
     console.log('Public Subnets:', vpc.publicSubnets.map(subnet => subnet.subnetId));
@@ -262,91 +310,97 @@ export class MultiTenantStack extends cdk.Stack {
     console.log('Private Subnets:', vpc.privateSubnets.map(subnet => subnet.subnetId));
 
     // Public Subnet IDs Output (if needed)
-    new cdk.CfnOutput(this, `${tenantId}-VpcPublicSubnetIds-${env}`, {
+    new cdk.CfnOutput(this, 'VpcPublicSubnetIdsOutput', {
       value: vpc.publicSubnets.map(subnet => subnet.subnetId).join(','),
       description: 'The IDs of the public subnets',
-      exportName: `${tenantId}-VpcPublicSubnetIds-${env}`,
+      exportName: 'VpcPublicSubnetIds',
     });
 
     // First Private Subnet IDs Output
-    new cdk.CfnOutput(this, `${tenantId}-VpcPrivateSubnet1Id-${env}`, {
+    new cdk.CfnOutput(this, 'VpcPrivateSubnet1IdOutput', {
       value: vpc.privateSubnets[0].subnetId,
       description: 'The ID of the first private subnet',
-      exportName: `${tenantId}-VpcPrivateSubnet1Id-${env}`,  
+      exportName: 'VpcPrivateSubnet1Id',  
     });
 
     // Second Private Subnet IDs Output
-    new cdk.CfnOutput(this, `${tenantId}-VpcPrivateSubnet2Id-${env}`, {
+    new cdk.CfnOutput(this, 'VpcPrivateSubnet2IdOutput', {
       value: vpc.privateSubnets[1].subnetId,
       description: 'The ID of the second private subnet',
-      exportName: `${tenantId}-VpcPrivateSubnet2Id-${env}`,  
+      exportName: 'VpcPrivateSubnet2Id',  
     });
 
     // Outputs for other stacks to use
-    new cdk.CfnOutput(this, `${tenantId}-UserPoolId-${env}`, {
+    new cdk.CfnOutput(this, 'UserPoolIdOutput', {
       value: userPool.userPoolId,
       description: 'Cognito User Pool ID',
-      exportName: `${tenantId}-UserPoolId-${env}`,
+      exportName: 'UserPoolId',
     });
 
-    new cdk.CfnOutput(this, `${tenantId}-UserPoolArn-${env}`, {
+    new cdk.CfnOutput(this, 'UserPoolArnOutput', {
       value: userPool.userPoolArn,
       description: 'Cognito User Pool ARN',
-      exportName: `${tenantId}-UserPoolArn-${env}`,
+      exportName: 'UserPoolArn',
     });
 
-    new cdk.CfnOutput(this, `${tenantId}-IdentityPoolId-${env}`, {
+    new cdk.CfnOutput(this, 'IdentityPoolIdOutput', {
       value: identityPool.ref,
       description: 'Cognito Identity Pool ID',
-      exportName: `${tenantId}-IdentityPoolId-${env}`,
+      exportName: 'IdentityPoolId',
     });
 
-    new cdk.CfnOutput(this, `${tenantId}-CognitoUserPoolName-${env}`, {
-      value: `${tenantId}-user-pool-${env}`,
+    new cdk.CfnOutput(this, 'CognitoUserPoolNameOutput', {
+      value: identityPool.attrName,
       description: 'Cognito User Pool Name',
-      exportName: `${tenantId}-CognitoUserPoolName-${env}`,
+      exportName: 'CognitoUserPoolName',
     });
 
-    new cdk.CfnOutput(this, `${tenantId}-UnauthenticatedRoleArn-${env}`, {
+    new cdk.CfnOutput(this, 'UnauthenticatedRoleArnOutput', {
       value: unauthRole.roleArn,
       description: 'IAM Role ARN for unauthenticated users',
-      exportName: `${tenantId}-UnauthenticatedRoleArn-${env}`,
+      exportName: 'UnauthenticatedRoleArn',
     });
 
-    new cdk.CfnOutput(this, `${tenantId}-AuthenticatedRoleArn-${env}`, {
+    new cdk.CfnOutput(this, 'AuthenticatedRoleArnOutput', {
       value: authRole.roleArn,
       description: 'IAM Role ARN for authenticated users',
-      exportName: `${tenantId}-AuthenticatedRoleArn-${env}`,
+      exportName: 'AuthenticatedRoleArn',
     });
 
-    new cdk.CfnOutput(this, `${tenantId}-ChatbotLambdaArn-${env}`, {
+    new cdk.CfnOutput(this, 'ChatbotLambdaArnOutput', {
       value: chatbotLambda.functionArn,
       description: 'Lambda ARN for the chatbot function',
-      exportName: `${tenantId}-ChatbotLambdaArn-${env}`,
+      exportName: 'ChatbotLambdaArn',
     });
 
-    new cdk.CfnOutput(this, `${tenantId}-ApiGatewayExecutionRoleArnOutput-${env}`, {
+    new cdk.CfnOutput(this, 'ApiGatewayExecutionRoleArnOutput', {
       value: apiGatewayExecutionRole.roleArn,
       description: 'API Gateway Execution Role ARN',
-      exportName: `${tenantId}-ApiGatewayExecutionRoleArn-${env}`,
+      exportName: 'ApiGatewayExecutionRoleArn',
     });
 
-    new cdk.CfnOutput(this, `${tenantId}-LogGroupArnOutput-${env}`, {
+    new cdk.CfnOutput(this, 'LogGroupArnOutput', {
       value: logGroup.logGroupArn,
       description: 'CloudWatch Log Group ARN for Lambda logs',
-      exportName: `${tenantId}-LogGroupArn-${env}`,
+      exportName: 'LogGroupArn',
     });
 
-    new cdk.CfnOutput(this, `${tenantId}-ChatS3BucketName-${env}`, {
+    new cdk.CfnOutput(this, 'ChatS3BucketNameOutput', {
       value: chatS3Bucket.bucketName,
       description: 'The name of the S3 bucket for chatbot data',
-      exportName: `${tenantId}-ChatS3BucketName-${env}`
+      exportName: 'ChatS3BucketName',
     });
 
-    new cdk.CfnOutput(this, `${tenantId}-ChatDynamoDb-${env}`, {
+    new cdk.CfnOutput(this, 'ChatS3BucketArnOutput', {
+      value: chatS3Bucket.bucketArn,
+      description: 'ARN of the S3 bucket for chatbot data',
+      exportName: 'ChatS3BucketArnOutput',
+    });
+
+    new cdk.CfnOutput(this, 'ChatDynamoDbTableNameOutput', {
       value: chatDynamoDbTable.tableName,
       description: 'The name of the DynamoDB table for chatbot logs',
-      exportName: `${tenantId}-ChatDynamoDb-${env}`
+      exportName: 'ChatDynamoDbTableNameOutput',
     });
   }
 };
