@@ -66,8 +66,6 @@ export class BedrockStack extends cdk.Stack {
       }
     });
 
-
-
     const agent = new bedrock.CfnAgent(this, 'Agent', {
       agentName: 'cdk-agent',
       agentResourceRoleArn: agentRole.attrArn,

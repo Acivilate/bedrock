@@ -1,7 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { LogGroup } from 'aws-cdk-lib/aws-logs';
-import { CfnVPCGatewayAttachment, SecurityGroup, Peer, Port, Vpc, CfnNatGateway, CfnInternetGateway, CfnEIP, SubnetType } from 'aws-cdk-lib/aws-ec2';  // Importing the specific components you need
+import { SecurityGroup, Peer, Port, Vpc, CfnNatGateway, CfnInternetGateway, CfnEIP, SubnetType } from 'aws-cdk-lib/aws-ec2';  // Importing the specific components you need
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3n from 'aws-cdk-lib/aws-s3-notifications';
@@ -9,7 +9,7 @@ import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
-import { CONFIG } from './config';
+import { CONFIG } from './config'; 
 
 export class MultiTenantStack extends cdk.Stack {
     readonly vpc: Vpc;
@@ -50,18 +50,6 @@ export class MultiTenantStack extends cdk.Stack {
         },
       ],
     });
-
-    // // Internet Gateway (for public subnets to access the internet)
-    // this.internetGateway = new cdk.aws_ec2.CfnInternetGateway(this, 'Internet-Gateway', {
-    //   tags: [
-    //     { key: 'Name', value: `${CONFIG.tenantId}-internet-gateway-${CONFIG.env}` }
-    //   ],
-    // });
-
-    // new CfnVPCGatewayAttachment(this, 'VPCGatewayAttachment', {
-    //   vpcId: vpc.vpcId,
-    //   internetGatewayId: this.internetGateway.ref,
-    // });
 
     // Create NAT Gateway (for private subnets to access the internet)
     this.elasticIp = new CfnEIP(this, 'ElasticIp', {
@@ -252,12 +240,7 @@ export class MultiTenantStack extends cdk.Stack {
       },
     });
     
-    // const apiGatewayExecutionRole = new iam.Role(this, `${CONFIG.tenantId}-ApiGatewayExecutionRole-${CONFIG.env}`, {
-    //   assumedBy: new iam.ServicePrincipal('apigateway.amazonaws.com'),
-    //   managedPolicies: [
-    //     iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AmazonAPIGatewayInvokeFullAccess'),
-    //   ],
-    // });
+    
     // CloudWatch Log Group** (For logging Lambda function executions)
     const logGroup = new LogGroup(this, 'LambdaLogGroup', {
       logGroupName: `/aws/lambda/${CONFIG.tenantId}-shared-log-group-${CONFIG.env}`,
@@ -286,12 +269,6 @@ export class MultiTenantStack extends cdk.Stack {
       description: 'The ID of the Security Group',
       exportName: 'SecurityGroupIdOutput',
     });
-
-    // new cdk.CfnOutput(this, 'InternetGatewayIdOutput', {
-    //   value: this.internetGateway.ref,
-    //   description: 'The ID of the Internet Gateway',
-    //   exportName: 'InternetGatewayIdOutput',
-    // });
 
     new cdk.CfnOutput(this, 'NatGatewayIdOutput', {
       value: this.natGateway.ref,
