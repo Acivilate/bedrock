@@ -16,5 +16,33 @@
         "amplifybedrock23fca3c2": {}
       }
     }
+  },
+  "tstrock": {
+    "awscloudformation": {
+      "AuthRoleName": "amplify-amplifybedrock-tstrock-1aa82-authRole",
+      "UnauthRoleArn": "arn:aws:iam::986437037830:role/amplify-amplifybedrock-tstrock-1aa82-unauthRole",
+      "AuthRoleArn": "arn:aws:iam::986437037830:role/amplify-amplifybedrock-tstrock-1aa82-authRole",
+      "Region": "us-east-1",
+      "DeploymentBucketName": "amplify-amplifybedrock-tstrock-1aa82-deployment",
+      "UnauthRoleName": "amplify-amplifybedrock-tstrock-1aa82-unauthRole",
+      "StackName": "amplify-amplifybedrock-tstrock-1aa82",
+      "StackId": "arn:aws:cloudformation:us-east-1:986437037830:stack/amplify-amplifybedrock-tstrock-1aa82/55a92f20-2450-11f0-8362-12a36ecb517f",
+      "AmplifyAppId": "d3kkc4subcuobw"
+    },
+    "categories": {
+      "auth": {
+        "amplifybedrock23fca3c2": {},
+        "userPoolGroups": {}
+      },
+      "function": {
+        "S3Trigger581a0d68": {
+          "deploymentBucketName": "amplify-amplifybedrock-tstrock-1aa82-deployment",
+          "s3Key": "amplify-builds/S3Trigger581a0d68-35547064725664664635-build.zip"
+        }
+      },
+      "storage": {
+        "chatS3Bucket": {}
+      }
+    }
   }
 }

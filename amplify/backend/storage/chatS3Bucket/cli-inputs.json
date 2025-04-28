@@ -1,0 +1,13 @@
+{
+  "resourceName": "chatS3Bucket",
+  "policyUUID": "7a1759ab",
+  "bucketName": "sand-chat-bucket-dev",
+  "storageAccess": "auth",
+  "guestAccess": [],
+  "authAccess": [
+    "CREATE_AND_UPDATE",
+    "READ",
+    "DELETE"
+  ],
+  "triggerFunction": "S3Trigger581a0d68"
+}
